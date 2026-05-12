@@ -1,0 +1,10 @@
+{
+  "files": {
+    "main.js": "/tour/static/js/main.bb956043.js",
+    "index.html": "/tour/index.html",
+    "main.bb956043.js.map": "/tour/static/js/main.bb956043.js.map"
+  },
+  "entrypoints": [
+    "static/js/main.bb956043.js"
+  ]
+}
