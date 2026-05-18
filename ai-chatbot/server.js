@@ -23,12 +23,12 @@ try {
     AI_RULES_TEXT = '';
 }
 
-// Tours from backend
+// Tours from backend - with extended metadata
 const TOURS = [
-    { _id: '1', name: 'Тур в Париж', description: 'Романтический тур', country: 'Франция', price: 50000, dates: '2024-06-01' },
-    { _id: '2', name: 'Тур в Токио', description: 'Культурный тур', country: 'Япония', price: 80000, dates: '2024-07-01' },
-    { _id: '3', name: 'Тур в Нью-Йорк', description: 'Городской тур', country: 'США', price: 70000, dates: '2024-08-01' },
-    { _id: '4', name: 'Тур в Барселону', description: 'Архитектурный тур', country: 'Испания', price: 45000, dates: '2024-06-15' }
+    { _id: '1', name: 'Тур в Париж', description: 'Романтический тур на неделю', country: 'Франция', price: 50000, dates: '2024-06-01', tags: ['романтический', 'город', 'культура'], nights: 7, includes: 'отель 4*, завтрак, экскурсии' },
+    { _id: '2', name: 'Тур в Токио', description: 'Культурный тур с посещением храмов и музеев', country: 'Япония', price: 80000, dates: '2024-07-01', tags: ['культура', 'город', 'экзотика'], nights: 10, includes: 'отель 4*, завтрак, гид на русском' },
+    { _id: '3', name: 'Тур в Нью-Йорк', description: 'Городской тур с посещением Бродвея и музеев', country: 'США', price: 70000, dates: '2024-08-01', tags: ['город', 'развлечения', 'шопинг'], nights: 5, includes: 'отель 5*, билеты в театры' },
+    { _id: '4', name: 'Тур в Барселону', description: 'Архитектурный тур с произведениями Гауди', country: 'Испания', price: 45000, dates: '2024-06-15', tags: ['архитектура', 'город', 'культура', 'бюджетный'], nights: 5, includes: 'отель 3*, завтрак, пляж' }
 ];
 
 const sessions = {};
@@ -44,14 +44,17 @@ function parseRequest(message) {
         farewell: /\b(пока|до свидания|спасибо|благодарю|спасибо большое)\b/.test(text),
         showAll: /\b(показать все|все туры|покажи все|давай все)\b/.test(text),
         booking: /\b(забронировать|купить|зарезервировать|оформить|брониру)\b/.test(text),
-        detail: /\b(подробнее|расскажи|что включает|что входит|какие условия)\b/.test(text),
-        preference: /\b(хочу|ищу|нужно|интересует|люблю|нравится|не хочу)\b/.test(text)
+        detail: /\b(подробнее|расскажи|что включает|что входит|какие условия|сколько дней|ночей)\b/.test(text),
+        preference: /\b(хочу|ищу|нужно|интересует|люблю|нравится|не хочу)\b/.test(text),
+        objection: /\b(дорого|слишком|дешевле|скидка|выплата|рассрочка)\b/.test(text),
+        tooExpensive: /\b(дорого|слишком дорого|не тяну|не потяну)\b/.test(text),
+        changePreference: /\b(другой|иной|еще|еще вариант|попробуй другой)\b/.test(text)
     };
 
+    let maxBudget = Infinity;
+    let minBudget = 0;
     const budgetRegex = /(до|от)?\s*([0-9][0-9\s,\.]*)\s*(k|к|тыс|тысяч|руб|рублей)?/i;
     const budgetMatch = text.match(budgetRegex);
-    let minBudget = 0;
-    let maxBudget = Infinity;
     if (budgetMatch) {
         const raw = budgetMatch[2].replace(/[ ,\.]/g, '');
         const value = parseInt(raw, 10);
@@ -65,6 +68,14 @@ function parseRequest(message) {
             maxBudget = normalized;
         }
     }
+
+    // Detect tour type preferences
+    const tourTypes = [];
+    if (/\b(романтичес|любовн|пара|молодож)\b/.test(text)) tourTypes.push('романтический');
+    if (/\b(семей|дети|ребенок|малыш)\b/.test(text)) tourTypes.push('семейный');
+    if (/\b(приключ|актив|экстрим|трек|поход)\b/.test(text)) tourTypes.push('приключенческий');
+    if (/\b(релакс|отдых|спа|пляж|бассейн)\b/.test(text)) tourTypes.push('релаксирующий');
+    if (/\b(культур|музей|достоприм|архитектур|искусство)\b/.test(text)) tourTypes.push('культурный');
 
     const countriesMap = {
         'париж': 'Франция',
@@ -90,7 +101,7 @@ function parseRequest(message) {
     const datesMatch = text.match(/\d{4}-\d{2}-\d{2}|\d{1,2}\s*(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)/i);
     const dates = datesMatch ? datesMatch[0] : null;
 
-    return { text, intent, budget: { minBudget, maxBudget }, countries, dates };
+    return { text, intent, budget: { minBudget, maxBudget }, countries, dates, tourTypes };
 }
 
 function mergePreferences(session, parsed) {
@@ -106,25 +117,55 @@ function mergePreferences(session, parsed) {
     if (parsed.dates) {
         session.preferences.dates = parsed.dates;
     }
+    if (parsed.tourTypes.length > 0) {
+        session.preferences.tourTypes = Array.from(new Set([...session.preferences.tourTypes, ...parsed.tourTypes]));
+    }
 }
 
 function scoreTour(tour, preferences) {
     let score = 0;
-    if (!preferences.countries.length || preferences.countries.includes(tour.country)) score += 40;
-    else score -= 15;
-    if (tour.price <= preferences.maxBudget && tour.price >= preferences.minBudget) score += 35;
-    else if (tour.price <= preferences.maxBudget) score += 15;
-    if (preferences.dates && tour.dates && tour.dates.includes(preferences.dates)) score += 10;
+    
+    // Country match (high weight)
+    if (!preferences.countries.length || preferences.countries.includes(tour.country)) {
+        score += 40;
+    } else {
+        score -= 15;
+    }
+    
+    // Budget fit (high weight)
+    if (tour.price <= preferences.maxBudget && tour.price >= preferences.minBudget) {
+        score += 35;
+    } else if (tour.price <= preferences.maxBudget) {
+        score += 15;
+    }
+    
+    // Prefer cheaper tours slightly
     score += Math.max(0, 10 - Math.floor(tour.price / 20000));
+    
+    // Date match
+    if (preferences.dates && tour.dates && tour.dates.includes(preferences.dates)) {
+        score += 10;
+    }
+    
+    // Tour type match
+    if (preferences.tourTypes.length > 0 && tour.tags) {
+        const matchedTags = tour.tags.filter(tag => preferences.tourTypes.includes(tag));
+        score += matchedTags.length * 15;
+    }
+    
     return score;
 }
 
 function buildRecommendationText(recommendations, showAll = false) {
     if (!recommendations.length) return '';
     if (showAll || recommendations.length <= 3) {
-        return recommendations.map((tour, index) => `${index + 1}. ${tour.name} — ${tour.price} руб. (${tour.country}), ${tour.description}, отправление ${tour.dates}`).join('\n');
+        return recommendations.map((tour, index) => 
+            `${index + 1}. ${tour.name} — ${tour.price} руб. (${tour.nights} ночей, ${tour.country})\n   ${tour.description}\n   Включено: ${tour.includes}`
+        ).join('\n\n');
     }
-    return recommendations.slice(0, 3).map((tour, index) => `${index + 1}. ${tour.name} — ${tour.price} руб. (${tour.country})`).join('\n');
+    return recommendations.slice(0, 3).map((tour, index) => 
+        `${index + 1}. ${tour.name} — ${tour.price} руб. (${tour.country}, ${tour.nights} ночей)`
+    ).join('\n');
 }
 
 function buildAIAnswer(session, parsed) {
@@ -136,67 +177,98 @@ function buildAIAnswer(session, parsed) {
     const recommendations = validTours.filter(tour => tour.score > 10);
     session.lastRecommendations = recommendations;
 
-    const hasPrefs = preferences.countries.length || preferences.maxBudget < Infinity || preferences.dates;
+    const hasPrefs = preferences.countries.length || preferences.maxBudget < Infinity || preferences.dates || preferences.tourTypes.length;
     const greeting = parsed.intent.greeting;
     const showAll = parsed.intent.showAll;
     const bookingIntent = parsed.intent.booking;
     const detailIntent = parsed.intent.detail;
     const farewell = parsed.intent.farewell;
+    const tooExpensive = parsed.intent.tooExpensive;
+    const changePreference = parsed.intent.changePreference;
+    const objection = parsed.intent.objection;
 
-    if (greeting && !hasPrefs) {
+    // Handle objections about price
+    if (tooExpensive && recommendations.length) {
+        const cheapest = validTours.filter(t => t.price < preferences.maxBudget).sort((a, b) => a.price - b.price)[0];
+        if (cheapest && cheapest.price < preferences.maxBudget * 0.8) {
+            let response = `Понимаю, может цена выше ожиданий. 💰 Предлагаю вариант дешевле:\n"${cheapest.name}" всего за ${cheapest.price} руб., ${cheapest.description}`;
+            response += `\n\nЭто включает: ${cheapest.includes}`;
+            return { response, recommendations: [cheapest] };
+        }
+        
+        if (preferences.maxBudget < Infinity && preferences.maxBudget > 20000) {
+            const newBudget = Math.floor(preferences.maxBudget * 0.7);
+            preferences.maxBudget = newBudget;
+            const cheaper = validTours.filter(t => t.price <= newBudget).sort((a, b) => b.score - a.score)[0];
+            if (cheaper) {
+                return {
+                    response: `Спасибо за уточнение! 👍 Тогда предлагаю туры до ${newBudget} руб.:\n"${cheaper.name}" — ${cheaper.price} руб.\n\nМожно ещё поискать в этом диапазоне?`,
+                    recommendations: validTours.filter(t => t.price <= newBudget).slice(0, 3)
+                };
+            }
+        }
+    }
+
+    if (greeting && !hasPrefs && session.history.length === 0) {
         return {
-            response: 'Здравствуйте! Я ваш персональный туроператор. Расскажите, пожалуйста, ваш бюджет, интересующие страны или даты, и я подберу лучшие варианты.',
+            response: 'Здравствуйте! 👋 Я ваш персональный туроператор. Расскажите о мечте вашего путешествия — бюджет, страна, тип отдыха (романтика, семья, приключение, культура), и я подберу идеальный тур!',
+            recommendations: []
+        };
+    }
+
+    if (greeting && hasPrefs) {
+        return {
+            response: `Спасибо за контакт! 😊 Помню ваши предпочтения. Давайте уточним деталь: вы ещё ищете подходящий вариант или хотите что-то изменить?`,
             recommendations: []
         };
     }
 
     if (farewell) {
         return {
-            response: 'Спасибо за обращение! Если захотите, я могу подобрать новые туры или помочь с бронированием.',
+            response: 'Спасибо за внимание! 🙏 Если захотите позже, я помогу вам найти идеальный тур. Звоните, пишите — я здесь!',
             recommendations: []
         };
     }
 
     if (!hasPrefs) {
         return {
-            response: 'Пока я знаю только, что вы хотите путешествие. Уточните, пожалуйста, бюджет, направление или даты поездки.',
+            response: 'Я хотел бы помочь, но пока знаю только, что вы хотите путешествие. Подскажите, пожалуйста:\n• Ваш бюджет?\n• Какие страны интересуют?\n• Тип отдыха (спокойный, активный, культурный)?',
             recommendations: []
         };
     }
 
     if (!recommendations.length) {
-        let response = 'Я посмотрел доступные туры и пока не нашёл подходящих с вашими текущими предпочтениями.';
+        let response = 'Я посмотрел доступные туры... к сожалению, подходящих вариантов пока нет.';
         if (preferences.maxBudget < Infinity) {
             response += ` Возможно, стоит увеличить бюджет выше ${preferences.maxBudget} руб.`;
         }
         if (preferences.countries.length) {
-            response += ` Или выберите другую страну вместо ${preferences.countries.join(', ')}.`;
+            response += ` Или попробуем ${preferences.countries.length === 1 ? 'другую' : 'другие'} страны?`;
         }
-        response += ' Напишите, пожалуйста, если хотите, чтобы я предложил другие варианты.';
+        response += '\n\nЧто вы предлагаете?';
         return { response, recommendations: [] };
     }
 
     if (bookingIntent) {
-        return {
-            response: 'Отлично! Я могу оформить бронирование. Пожалуйста, напишите ваши данные (имя, телефон и дату), и я подготовлю подтверждение.',
-            recommendations: recommendations.slice(0, 3)
-        };
+        const top3 = recommendations.slice(0, 3);
+        let response = 'Отлично! 🎉 Я готов помочь с бронированием. Выберите подходящий тур и напишите:\n• Фамилию и имя\n• Номер телефона\n• Количество человек\n\nВот мои ТОП рекомендации:';
+        return { response, recommendations: top3 };
     }
 
     const recommendationText = buildRecommendationText(recommendations, showAll);
-    let response = 'Я подобрал несколько выгодных вариантов как ваш туроператор:';
-    response += '\n' + recommendationText;
+    let response = `Отлично! 🎯 Я подобрал для вас лучшие варианты:\n\n${recommendationText}`;
 
     if (showAll) {
-        response += '\n\nЕсли хотите, могу оставить только самые подходящие варианты или подобрать по более точным датам.';
+        response += '\n\n📋 Все варианты перед вами. Какой привлекает больше?';
     } else if (recommendations.length > 3) {
-        response += '\n\nСкажите, какой вариант вам нравится больше, или напишите "показать все", чтобы увидеть полный список.';
+        response += '\n\n✨ Это топ-3 по релевантности. Хотите увидеть остальные — напишите "показать все"?';
     } else {
-        response += '\n\nЕсли хотите, я могу рассказать подробнее про любой из этих туров.';
+        response += '\n\n📞 Интересует один из этих туров? Спросите подробнее, и я расскажу о сроках вылета, визах, страховке.';
     }
 
     if (detailIntent && recommendations.length) {
-        response = `Хорошо, вот подробности по лучшим вариантам:\n${buildRecommendationText(recommendations, true)}`;
+        const top = recommendations[0];
+        response = `Подробнее о "${top.name}":\n\n📍 Страна: ${top.country}\n💰 Цена: ${top.price} руб.\n🌙 Количество ночей: ${top.nights}\n📝 Описание: ${top.description}\n✓ Включено: ${top.includes}\n\n📅 Отправление: ${top.dates}\n\nХотите забронировать или посмотреть альтернативы?`;
     }
 
     return { response, recommendations: recommendations.slice(0, 5) };
@@ -206,7 +278,7 @@ function getSession(sessionId) {
     if (!sessionId) return null;
     if (!sessions[sessionId]) {
         sessions[sessionId] = {
-            preferences: { minBudget: 0, maxBudget: Infinity, countries: [], dates: null },
+            preferences: { minBudget: 0, maxBudget: Infinity, countries: [], dates: null, tourTypes: [] },
             history: [],
             lastRecommendations: []
         };
@@ -216,7 +288,7 @@ function getSession(sessionId) {
 
 function recommendTours(userMessage, sessionId) {
     const parsed = parseRequest(userMessage);
-    const session = getSession(sessionId) || { preferences: { minBudget: 0, maxBudget: Infinity, countries: [], dates: null }, history: [], lastRecommendations: [] };
+    const session = getSession(sessionId) || { preferences: { minBudget: 0, maxBudget: Infinity, countries: [], dates: null, tourTypes: [] }, history: [], lastRecommendations: [] };
     session.history.push({ role: 'user', text: userMessage });
     mergePreferences(session, parsed);
     const result = buildAIAnswer(session, parsed);
@@ -230,6 +302,7 @@ function recommendTours(userMessage, sessionId) {
             maxBudget: session.preferences.maxBudget,
             countries: session.preferences.countries,
             dates: session.preferences.dates,
+            tourTypes: session.preferences.tourTypes,
             historyLength: session.history.length,
             rulesSummary: AI_RULES_TEXT ? AI_RULES_TEXT.substring(0, 1500) : ''
         }
