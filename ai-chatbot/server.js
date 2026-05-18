@@ -48,7 +48,7 @@ function parseRequest(message) {
         preference: /\b(хочу|ищу|нужно|интересует|люблю|нравится|не хочу)\b/.test(text)
     };
 
-    const budgetRegex = /(до|от)?\s*([0-9\s,\.]+)\s*(k|к|тыс|тысяч|руб|рублей)?/i;
+    const budgetRegex = /(до|от)?\s*([0-9][0-9\s,\.]*)\s*(k|к|тыс|тысяч|руб|рублей)?/i;
     const budgetMatch = text.match(budgetRegex);
     let minBudget = 0;
     let maxBudget = Infinity;
@@ -68,8 +68,10 @@ function parseRequest(message) {
 
     const countriesMap = {
         'париж': 'Франция',
+        'францию': 'Франция',
         'франция': 'Франция',
         'токио': 'Япония',
+        'японию': 'Япония',
         'япония': 'Япония',
         'нью-йорк': 'США',
         'нью йорк': 'США',
@@ -77,7 +79,9 @@ function parseRequest(message) {
         'соединенные штаты': 'США',
         'сша': 'США',
         'барселона': 'Испания',
-        'испания': 'Испания'
+        'барселону': 'Испания',
+        'испания': 'Испания',
+        'испанию': 'Испания'
     };
     const countries = Object.entries(countriesMap)
         .filter(([key]) => text.includes(key))
